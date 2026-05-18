@@ -1,0 +1,37 @@
+[package]
+name = "mini-rudis"
+version = "0.1.0"
+edition = "2021"
+description = "A Redis-compatible in-memory cache server implemented in Rust"
+authors = ["mini-rudis contributors"]
+license = "MIT"
+
+[[bin]]
+name = "mini-rudis"
+path = "src/main.rs"
+
+[lib]
+name = "mini_rudis"
+path = "src/lib.rs"
+
+[dependencies]
+tokio = { version = "1", features = ["full"] }
+bytes = "1"
+thiserror = "2"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+mlua = { version = "0.10", features = ["lua54", "vendored"] }
+clap = { version = "4", features = ["derive"] }
+parking_lot = "0.12"
+dashmap = "6"
+ordered-float = "4"
+glob = "0.3"
+rand = "0.9"
+sha1 = "0.10"
+
+[dev-dependencies]
+tokio-test = "0.4"
+
+[profile.release]
+opt-level = 3
+lto = true

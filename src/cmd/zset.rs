@@ -1,11 +1,12 @@
 use bytes::Bytes;
-use parking_lot::Mutex;
-use std::sync::Arc;
+use std::rc::Rc;
 
 use crate::cmd::{int_result, parse_f64, parse_i64, parse_usize, Command};
-use crate::db::{format_float, Database, ScoreBound};
+use crate::db::{format_float, ScoreBound};
 use crate::error::{RedisError, Result};
 use crate::proto::Frame;
+use crate::script::ScriptEngine;
+use crate::SharedDb;
 
 #[derive(Debug)]
 pub struct ZAddArgs {
@@ -289,12 +290,12 @@ pub fn parse_zpop(args: &[Bytes], min: bool) -> Result<Command> {
 
 pub fn execute(
     cmd: Command,
-    db: &Arc<Mutex<Database>>,
+    db: &SharedDb,
     db_index: &mut usize,
-    script_engine: &Arc<crate::script::ScriptEngine>,
+    script_engine: &Rc<crate::script::ScriptEngine>,
 ) -> Frame {
     match cmd {
-        Command::ZAdd(args) => int_result(db.lock().zadd(
+        Command::ZAdd(args) => int_result(db.borrow_mut().zadd(
             *db_index,
             &args.key,
             args.members,
@@ -305,14 +306,14 @@ pub fn execute(
             args.ch,
         )),
         Command::ZRem(key, members) => {
-            int_result(db.lock().zrem(*db_index, &key, &members).map(|n| n as i64))
+            int_result(db.borrow_mut().zrem(*db_index, &key, &members).map(|n| n as i64))
         }
-        Command::ZScore(key, member) => match db.lock().zscore(*db_index, &key, &member) {
+        Command::ZScore(key, member) => match db.borrow_mut().zscore(*db_index, &key, &member) {
             Ok(Some(s)) => Frame::bulk_str(format_float(s)),
             Ok(None) => Frame::Null,
             Err(e) => Frame::from_error(&e),
         },
-        Command::ZMScore(key, members) => match db.lock().zmscore(*db_index, &key, &members) {
+        Command::ZMScore(key, members) => match db.borrow_mut().zmscore(*db_index, &key, &members) {
             Ok(scores) => Frame::Array(
                 scores
                     .into_iter()
@@ -325,22 +326,22 @@ pub fn execute(
             Err(e) => Frame::from_error(&e),
         },
         Command::ZIncrBy(key, delta, member) => {
-            match db.lock().zincrby(*db_index, &key, delta, &member) {
+            match db.borrow_mut().zincrby(*db_index, &key, delta, &member) {
                 Ok(score) => Frame::bulk_str(format_float(score)),
                 Err(e) => Frame::from_error(&e),
             }
         }
-        Command::ZRank(key, member) => match db.lock().zrank(*db_index, &key, &member) {
+        Command::ZRank(key, member) => match db.borrow_mut().zrank(*db_index, &key, &member) {
             Ok(Some(r)) => Frame::Integer(r as i64),
             Ok(None) => Frame::Null,
             Err(e) => Frame::from_error(&e),
         },
-        Command::ZRevRank(key, member) => match db.lock().zrevrank(*db_index, &key, &member) {
+        Command::ZRevRank(key, member) => match db.borrow_mut().zrevrank(*db_index, &key, &member) {
             Ok(Some(r)) => Frame::Integer(r as i64),
             Ok(None) => Frame::Null,
             Err(e) => Frame::from_error(&e),
         },
-        Command::ZCard(key) => int_result(db.lock().zcard(*db_index, &key).map(|n| n as i64)),
+        Command::ZCard(key) => int_result(db.borrow_mut().zcard(*db_index, &key).map(|n| n as i64)),
         Command::ZCount(key, min_s, max_s) => {
             let min = match ScoreBound::parse_min(&min_s) {
                 Ok(b) => b,
@@ -351,14 +352,14 @@ pub fn execute(
                 Err(e) => return Frame::from_error(&e),
             };
             int_result(
-                db.lock()
+                db.borrow_mut()
                     .zcount(*db_index, &key, min, max)
                     .map(|n| n as i64),
             )
         }
         Command::ZRange(key, start, stop, rev, withscores) => {
             match db
-                .lock()
+                .borrow_mut()
                 .zrange(*db_index, &key, start, stop, rev, withscores)
             {
                 Ok(items) => build_member_score_array(items),
@@ -374,7 +375,7 @@ pub fn execute(
                 Ok(b) => b,
                 Err(e) => return Frame::from_error(&e),
             };
-            match db.lock().zrangebyscore(
+            match db.borrow_mut().zrangebyscore(
                 *db_index,
                 &args.key,
                 min,
@@ -396,7 +397,7 @@ pub fn execute(
                 Ok(b) => b,
                 Err(e) => return Frame::from_error(&e),
             };
-            match db.lock().zrevrangebyscore(
+            match db.borrow_mut().zrevrangebyscore(
                 *db_index,
                 &args.key,
                 max,
@@ -411,7 +412,7 @@ pub fn execute(
         }
         Command::ZRevRange(key, start, stop, withscores) => {
             match db
-                .lock()
+                .borrow_mut()
                 .zrange(*db_index, &key, start, stop, true, withscores)
             {
                 Ok(items) => build_member_score_array(items),
@@ -419,7 +420,7 @@ pub fn execute(
             }
         }
         Command::ZRemRangeByRank(key, start, stop) => int_result(
-            db.lock()
+            db.borrow_mut()
                 .zremrangebyrank(*db_index, &key, start, stop)
                 .map(|n| n as i64),
         ),
@@ -433,12 +434,12 @@ pub fn execute(
                 Err(e) => return Frame::from_error(&e),
             };
             int_result(
-                db.lock()
+                db.borrow_mut()
                     .zremrangebyscore(*db_index, &key, min, max)
                     .map(|n| n as i64),
             )
         }
-        Command::ZPopMin(key, count) => match db.lock().zpopmin(*db_index, &key, count) {
+        Command::ZPopMin(key, count) => match db.borrow_mut().zpopmin(*db_index, &key, count) {
             Ok(items) => Frame::Array(
                 items
                     .into_iter()
@@ -447,7 +448,7 @@ pub fn execute(
             ),
             Err(e) => Frame::from_error(&e),
         },
-        Command::ZPopMax(key, count) => match db.lock().zpopmax(*db_index, &key, count) {
+        Command::ZPopMax(key, count) => match db.borrow_mut().zpopmax(*db_index, &key, count) {
             Ok(items) => Frame::Array(
                 items
                     .into_iter()
@@ -467,7 +468,8 @@ pub fn execute(
                 .iter()
                 .map(|b| String::from_utf8_lossy(b).into_owned())
                 .collect();
-            match script_engine.eval(
+            match ScriptEngine::eval(
+                script_engine,
                 &String::from_utf8_lossy(&script),
                 &keys,
                 &argv,
@@ -488,7 +490,14 @@ pub fn execute(
                 .iter()
                 .map(|b| String::from_utf8_lossy(b).into_owned())
                 .collect();
-            match script_engine.evalsha(&sha_str, &keys, &argv, db, db_index) {
+            match ScriptEngine::evalsha(
+                script_engine,
+                &sha_str,
+                &keys,
+                &argv,
+                db,
+                db_index,
+            ) {
                 Ok(f) => f,
                 Err(e) => Frame::from_error(&e),
             }

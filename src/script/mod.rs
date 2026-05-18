@@ -1,78 +1,79 @@
-/// Lua 脚本执行引擎
+/// Lua 脚本执行引擎（单线程 `LocalSet` 语义下使用）。
 ///
-/// 实现 EVAL / EVALSHA / SCRIPT LOAD / SCRIPT FLUSH 命令。
-/// 每次 EVAL 调用都在一个干净的 Lua 环境中执行，KEYS 和 ARGV 全局变量已注入。
-/// `redis.call()` 和 `redis.pcall()` 会转发到数据库层执行。
+/// `redis.call` / `redis.pcall` 与命令层共享同一 `Rc<RefCell<Database>>`，无需 Mutex。
+use std::cell::RefCell;
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::rc::Rc;
 
 use mlua::prelude::*;
-use parking_lot::Mutex;
 use sha1::{Digest, Sha1};
 
-use crate::db::Database;
 use crate::error::{RedisError, Result};
 use crate::proto::Frame;
+use crate::SharedDb;
 
-/// 脚本引擎：管理脚本缓存并提供执行能力
+/// 脚本引擎：管理脚本缓存并提供执行能力。
 pub struct ScriptEngine {
-    /// SHA1 → 脚本源码 的缓存
-    cache: Mutex<HashMap<String, String>>,
+    /// SHA1 → 源码
+    cache: RefCell<HashMap<String, String>>,
 }
 
 impl ScriptEngine {
     pub fn new() -> Self {
         ScriptEngine {
-            cache: Mutex::new(HashMap::new()),
+            cache: RefCell::new(HashMap::new()),
         }
     }
 
-    /// 计算脚本的 SHA1 摘要（与 Redis 兼容的小写十六进制字符串）
+    /// 计算脚本 SHA1（小写十六进制，与 Redis 一致）
     pub fn sha1_hex(script: &str) -> String {
         let mut hasher = Sha1::new();
         hasher.update(script.as_bytes());
         format!("{:x}", hasher.finalize())
     }
 
-    /// 加载脚本到缓存并返回 SHA1
+    /// 载入缓存并返回 SHA1
     pub fn load_script(&self, script: &str) -> Result<String> {
         let sha = Self::sha1_hex(script);
-        self.cache.lock().insert(sha.clone(), script.to_owned());
+        self.cache.borrow_mut().insert(sha.clone(), script.to_owned());
         Ok(sha)
     }
 
-    /// 清空脚本缓存
     pub fn flush(&self) {
-        self.cache.lock().clear();
+        self.cache.borrow_mut().clear();
     }
 
-    /// 通过 SHA1 执行脚本
+    /// 按 SHA1 执行已缓存脚本
     pub fn evalsha(
-        &self,
+        engine: &Rc<Self>,
         sha: &str,
         keys: &[String],
         argv: &[String],
-        db: &Arc<Mutex<Database>>,
+        db: &SharedDb,
         db_index: &mut usize,
     ) -> Result<Frame> {
-        let script = self.cache.lock().get(sha).cloned().ok_or_else(|| {
-            RedisError::Generic("NOSCRIPT No matching script. Please use EVAL.".into())
-        })?;
-        self.eval(&script, keys, argv, db, db_index)
+        let script = engine
+            .cache
+            .borrow()
+            .get(sha)
+            .cloned()
+            .ok_or_else(|| {
+                RedisError::Generic("NOSCRIPT No matching script. Please use EVAL.".into())
+            })?;
+        Self::eval(engine, &script, keys, argv, db, db_index)
     }
 
-    /// 执行 Lua 脚本
+    /// 执行 Lua 源码
     pub fn eval(
-        &self,
+        engine: &Rc<Self>,
         script: &str,
         keys: &[String],
         argv: &[String],
-        db: &Arc<Mutex<Database>>,
+        db: &SharedDb,
         db_index: &mut usize,
     ) -> Result<Frame> {
-        // 每次 eval 创建新的 Lua 虚拟机以隔离状态
         let lua = Lua::new();
-        self.setup_lua_env(&lua, keys, argv, db, db_index)?;
+        Self::inject_redis_env(engine, &lua, keys, argv, db, *db_index)?;
 
         let result: LuaValue = lua
             .load(script)
@@ -82,45 +83,41 @@ impl ScriptEngine {
         lua_value_to_frame(result)
     }
 
-    /// 初始化 Lua 环境：注入 KEYS、ARGV 和 redis 全局对象
-    fn setup_lua_env(
-        &self,
+    fn inject_redis_env(
+        engine: &Rc<Self>,
         lua: &Lua,
         keys: &[String],
         argv: &[String],
-        db: &Arc<Mutex<Database>>,
-        db_index: &mut usize,
+        db: &SharedDb,
+        db_index: usize,
     ) -> Result<()> {
         let globals = lua.globals();
 
-        // 注入 KEYS 表（1-indexed）
         let keys_table = lua.create_table().map_err(lua_err)?;
         for (i, k) in keys.iter().enumerate() {
             keys_table.set(i + 1, k.as_str()).map_err(lua_err)?;
         }
         globals.set("KEYS", keys_table).map_err(lua_err)?;
 
-        // 注入 ARGV 表（1-indexed）
         let argv_table = lua.create_table().map_err(lua_err)?;
         for (i, a) in argv.iter().enumerate() {
             argv_table.set(i + 1, a.as_str()).map_err(lua_err)?;
         }
         globals.set("ARGV", argv_table).map_err(lua_err)?;
 
-        // 构造 redis.call / redis.pcall
-        let db_clone = Arc::clone(db);
-        let db_idx = *db_index;
-
+        let db_call = Rc::clone(db);
+        let se_call = Rc::clone(engine);
         let call_fn = lua
             .create_function(move |lua, args: LuaMultiValue| {
-                exec_redis_call(lua, args, &db_clone, db_idx, false)
+                exec_redis_call(lua, args, &db_call, db_index, false, Rc::clone(&se_call))
             })
             .map_err(lua_err)?;
 
-        let db_clone2 = Arc::clone(db);
+        let db_p = Rc::clone(db);
+        let se_p = Rc::clone(engine);
         let pcall_fn = lua
             .create_function(move |lua, args: LuaMultiValue| {
-                exec_redis_call(lua, args, &db_clone2, db_idx, true)
+                exec_redis_call(lua, args, &db_p, db_index, true, Rc::clone(&se_p))
             })
             .map_err(lua_err)?;
 
@@ -150,19 +147,18 @@ impl Default for ScriptEngine {
     }
 }
 
-/// 在 Lua 中执行一条 Redis 命令（redis.call 的实现）
 fn exec_redis_call(
     lua: &Lua,
     args: LuaMultiValue,
-    db: &Arc<Mutex<Database>>,
+    db: &SharedDb,
     db_index: usize,
     pcall: bool,
+    script_engine: Rc<ScriptEngine>,
 ) -> LuaResult<LuaMultiValue> {
     if args.is_empty() {
         return Err(LuaError::RuntimeError("redis.call: missing command".into()));
     }
 
-    // 将 Lua 参数转换为字节串向量
     let cmd_args: Vec<bytes::Bytes> = args
         .iter()
         .map(|v| match v {
@@ -178,7 +174,6 @@ fn exec_redis_call(
 
     let cmd = crate::cmd::parse(&cmd_args).map_err(|e| LuaError::RuntimeError(e.to_string()))?;
 
-    let script_engine = Arc::new(ScriptEngine::new());
     let mut idx = db_index;
     let frame = crate::cmd::execute(cmd, db, &mut idx, &script_engine);
 
@@ -193,7 +188,6 @@ fn exec_redis_call(
     Ok(LuaMultiValue::from_vec(vec![lua_val]))
 }
 
-/// 将 RESP Frame 转换为 Lua 值
 fn frame_to_lua_value(lua: &Lua, frame: Frame) -> LuaResult<LuaValue> {
     match frame {
         Frame::Simple(s) => Ok(LuaValue::String(lua.create_string(&s)?)),
@@ -215,7 +209,6 @@ fn frame_to_lua_value(lua: &Lua, frame: Frame) -> LuaResult<LuaValue> {
     }
 }
 
-/// 将 Lua 值转换为 RESP Frame（脚本返回值）
 fn lua_value_to_frame(val: LuaValue) -> Result<Frame> {
     match val {
         LuaValue::Nil => Ok(Frame::Null),
@@ -230,15 +223,12 @@ fn lua_value_to_frame(val: LuaValue) -> Result<Frame> {
         LuaValue::Number(f) => Ok(Frame::Integer(f as i64)),
         LuaValue::String(s) => Ok(Frame::bulk_bytes(s.as_bytes().to_vec())),
         LuaValue::Table(t) => {
-            // 检查是否是错误表 {err = "..."}
             if let Ok(LuaValue::String(err)) = t.get("err") {
                 return Ok(Frame::Error(err.to_string_lossy().to_owned()));
             }
-            // 检查是否是状态表 {ok = "..."}
             if let Ok(LuaValue::String(ok)) = t.get("ok") {
                 return Ok(Frame::Simple(ok.to_string_lossy().to_owned()));
             }
-            // 普通数组（1-indexed）
             let mut frames = Vec::new();
             let mut i = 1i64;
             loop {
@@ -262,11 +252,10 @@ fn lua_err(e: LuaError) -> RedisError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use parking_lot::Mutex;
-    use std::sync::Arc;
+    use crate::db::Database;
 
-    fn make_db() -> Arc<Mutex<Database>> {
-        Arc::new(Mutex::new(Database::new(16)))
+    fn make_db() -> SharedDb {
+        Rc::new(RefCell::new(Database::new(16)))
     }
 
     #[test]
@@ -278,60 +267,65 @@ mod tests {
 
     #[test]
     fn test_eval_return_integer() {
-        let engine = ScriptEngine::new();
+        let engine = Rc::new(ScriptEngine::new());
         let db = make_db();
         let mut idx = 0;
-        let frame = engine.eval("return 42", &[], &[], &db, &mut idx).unwrap();
+        let frame = ScriptEngine::eval(&engine, "return 42", &[], &[], &db, &mut idx).unwrap();
         assert_eq!(frame, Frame::Integer(42));
     }
 
     #[test]
     fn test_eval_return_string() {
-        let engine = ScriptEngine::new();
+        let engine = Rc::new(ScriptEngine::new());
         let db = make_db();
         let mut idx = 0;
-        let frame = engine
-            .eval("return 'hello'", &[], &[], &db, &mut idx)
-            .unwrap();
+        let frame = ScriptEngine::eval(&engine, "return 'hello'", &[], &[], &db, &mut idx).unwrap();
         assert_eq!(frame, Frame::Bulk(bytes::Bytes::from("hello")));
     }
 
     #[test]
     fn test_eval_keys_argv() {
-        let engine = ScriptEngine::new();
+        let engine = Rc::new(ScriptEngine::new());
         let db = make_db();
         let mut idx = 0;
-        let frame = engine
-            .eval("return KEYS[1]", &["mykey".into()], &[], &db, &mut idx)
-            .unwrap();
+        let frame = ScriptEngine::eval(
+            &engine,
+            "return KEYS[1]",
+            &["mykey".into()],
+            &[],
+            &db,
+            &mut idx,
+        )
+        .unwrap();
         assert_eq!(frame, Frame::Bulk(bytes::Bytes::from("mykey")));
     }
 
     #[test]
     fn test_script_load_and_evalsha() {
-        let engine = ScriptEngine::new();
+        let engine = Rc::new(ScriptEngine::new());
         let db = make_db();
         let mut idx = 0;
         let sha = engine.load_script("return 'loaded'").unwrap();
         assert_eq!(sha.len(), 40);
-        let frame = engine.evalsha(&sha, &[], &[], &db, &mut idx).unwrap();
+        let frame =
+            ScriptEngine::evalsha(&engine, &sha, &[], &[], &db, &mut idx).unwrap();
         assert_eq!(frame, Frame::Bulk(bytes::Bytes::from("loaded")));
     }
 
     #[test]
     fn test_eval_redis_set_get() {
-        let engine = ScriptEngine::new();
+        let engine = Rc::new(ScriptEngine::new());
         let db = make_db();
         let mut idx = 0;
-        let frame = engine
-            .eval(
-                "redis.call('SET', KEYS[1], ARGV[1]); return redis.call('GET', KEYS[1])",
-                &["k".into()],
-                &["v".into()],
-                &db,
-                &mut idx,
-            )
-            .unwrap();
+        let frame = ScriptEngine::eval(
+            &engine,
+            "redis.call('SET', KEYS[1], ARGV[1]); return redis.call('GET', KEYS[1])",
+            &["k".into()],
+            &["v".into()],
+            &db,
+            &mut idx,
+        )
+        .unwrap();
         assert_eq!(frame, Frame::Bulk(bytes::Bytes::from("v")));
     }
 }

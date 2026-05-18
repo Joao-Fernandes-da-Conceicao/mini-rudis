@@ -9,10 +9,9 @@ pub mod string;
 pub mod zset;
 
 use bytes::Bytes;
-use parking_lot::Mutex;
-use std::sync::Arc;
+use std::rc::Rc;
 
-use crate::db::Database;
+use crate::SharedDb;
 use crate::error::{RedisError, Result};
 use crate::proto::Frame;
 
@@ -329,9 +328,9 @@ fn parse_script(args: &[Bytes]) -> Result<Command> {
 /// `db_index` 是当前连接选择的逻辑库编号。
 pub fn execute(
     cmd: Command,
-    db: &Arc<Mutex<Database>>,
+    db: &SharedDb,
     db_index: &mut usize,
-    script_engine: &Arc<crate::script::ScriptEngine>,
+    script_engine: &Rc<crate::script::ScriptEngine>,
 ) -> Frame {
     match cmd {
         Command::Ping(msg) => match msg {
@@ -347,47 +346,47 @@ pub fn execute(
             Frame::ok()
         }
         Command::Dbsize => {
-            let db = db.lock();
+            let db = db.borrow_mut();
             match db.dbsize(*db_index) {
                 Ok(n) => Frame::int(n as i64),
                 Err(e) => Frame::from_error(&e),
             }
         }
         Command::Flushdb => {
-            let mut db = db.lock();
+            let mut db = db.borrow_mut();
             match db.flushdb(*db_index) {
                 Ok(_) => Frame::ok(),
                 Err(e) => Frame::from_error(&e),
             }
         }
         Command::Flushall => {
-            db.lock().flushall();
+            db.borrow_mut().flushall();
             Frame::ok()
         }
         Command::Info => Frame::bulk_str(info_string()),
         Command::Quit => Frame::ok(),
 
         // ── 通用 Key ────────────────────────────────────────────────
-        Command::Del(keys) => int_result(db.lock().del(*db_index, &keys)),
-        Command::Exists(keys) => int_result(db.lock().exists(*db_index, &keys)),
-        Command::Type(key) => match db.lock().type_of(*db_index, &key) {
+        Command::Del(keys) => int_result(db.borrow_mut().del(*db_index, &keys)),
+        Command::Exists(keys) => int_result(db.borrow_mut().exists(*db_index, &keys)),
+        Command::Type(key) => match db.borrow_mut().type_of(*db_index, &key) {
             Ok(t) => Frame::Simple(t.to_string()),
             Err(e) => Frame::from_error(&e),
         },
-        Command::Rename(src, dst) => ok_result(db.lock().rename(*db_index, &src, &dst)),
-        Command::Renamenx(src, dst) => bool_int_result(db.lock().renamenx(*db_index, &src, &dst)),
-        Command::Expire(key, secs) => bool_int_result(db.lock().expire(*db_index, &key, secs)),
-        Command::PExpire(key, ms) => bool_int_result(db.lock().pexpire(*db_index, &key, ms)),
-        Command::ExpireAt(key, ts) => bool_int_result(db.lock().expireat(*db_index, &key, ts)),
-        Command::PExpireAt(key, ts) => bool_int_result(db.lock().pexpireat(*db_index, &key, ts)),
-        Command::Ttl(key) => int_result(db.lock().ttl(*db_index, &key)),
-        Command::Pttl(key) => int_result(db.lock().pttl(*db_index, &key)),
-        Command::Persist(key) => bool_int_result(db.lock().persist(*db_index, &key)),
-        Command::Keys(pattern) => match db.lock().keys(*db_index, &pattern) {
+        Command::Rename(src, dst) => ok_result(db.borrow_mut().rename(*db_index, &src, &dst)),
+        Command::Renamenx(src, dst) => bool_int_result(db.borrow_mut().renamenx(*db_index, &src, &dst)),
+        Command::Expire(key, secs) => bool_int_result(db.borrow_mut().expire(*db_index, &key, secs)),
+        Command::PExpire(key, ms) => bool_int_result(db.borrow_mut().pexpire(*db_index, &key, ms)),
+        Command::ExpireAt(key, ts) => bool_int_result(db.borrow_mut().expireat(*db_index, &key, ts)),
+        Command::PExpireAt(key, ts) => bool_int_result(db.borrow_mut().pexpireat(*db_index, &key, ts)),
+        Command::Ttl(key) => int_result(db.borrow_mut().ttl(*db_index, &key)),
+        Command::Pttl(key) => int_result(db.borrow_mut().pttl(*db_index, &key)),
+        Command::Persist(key) => bool_int_result(db.borrow_mut().persist(*db_index, &key)),
+        Command::Keys(pattern) => match db.borrow_mut().keys(*db_index, &pattern) {
             Ok(keys) => Frame::Array(keys.into_iter().map(Frame::bulk_str).collect()),
             Err(e) => Frame::from_error(&e),
         },
-        Command::Randomkey => match db.lock().randomkey(*db_index) {
+        Command::Randomkey => match db.borrow_mut().randomkey(*db_index) {
             Ok(Some(k)) => Frame::bulk_str(k),
             Ok(None) => Frame::Null,
             Err(e) => Frame::from_error(&e),

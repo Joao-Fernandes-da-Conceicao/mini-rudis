@@ -1,11 +1,17 @@
 /// mini-rudis 入口
 ///
-/// 使用 `--help` 查看完整参数列表。
+/// 使用 **`current_thread` runtime + [`tokio::task::LocalSet`]**：单线程调度所有异步任务，
+/// 配合 `Rc<RefCell<Database>>` 实现命令路径无互斥锁（对齐 Redis 「单线程执行命令」模型）。
+///
+/// # 不要使用 `#[tokio::main]`
+///
+/// 多线程运行时默认下的 `spawn` 要求 `Send`，且无法与安全使用 `Rc`/`spawn_local` 的模型混用。
 use clap::Parser;
 use tracing::info;
 use tracing_subscriber::{fmt, EnvFilter};
 
 use mini_rudis::server::{run, ServerConfig};
+use tokio::task::LocalSet;
 
 /// mini-rudis：Rust 实现的单机 Redis 兼容缓存服务器
 #[derive(Parser, Debug)]
@@ -32,20 +38,14 @@ struct Cli {
     eviction_interval_ms: u64,
 }
 
-#[tokio::main]
-async fn main() {
+fn main() {
     let cli = Cli::parse();
 
-    // 初始化日志
     let filter =
         EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(&cli.log_level));
     fmt().with_env_filter(filter).init();
 
     info!("mini-rudis v{}", env!("CARGO_PKG_VERSION"));
-    info!(
-        "starting on {}:{} with {} databases",
-        cli.host, cli.port, cli.databases
-    );
 
     let config = ServerConfig {
         host: cli.host,
@@ -54,8 +54,21 @@ async fn main() {
         eviction_interval_ms: cli.eviction_interval_ms,
     };
 
-    if let Err(e) = run(config).await {
-        eprintln!("Server error: {e}");
-        std::process::exit(1);
-    }
+    info!(
+        "starting single-thread dispatcher on {}:{} ({} databases)",
+        config.host, config.port, config.db_count
+    );
+
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("failed to build Tokio runtime");
+
+    let local = LocalSet::new();
+    local.block_on(&rt, async move {
+        if let Err(e) = run(config).await {
+            eprintln!("Server error: {e}");
+            std::process::exit(1);
+        }
+    });
 }

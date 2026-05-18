@@ -22,8 +22,6 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 mlua = { version = "0.10", features = ["lua54", "vendored"] }
 clap = { version = "4", features = ["derive"] }
-parking_lot = "0.12"
-dashmap = "6"
 ordered-float = "4"
 glob = "0.3"
 rand = "0.9"

@@ -1,11 +1,10 @@
 use bytes::Bytes;
-use parking_lot::Mutex;
-use std::sync::Arc;
+use std::rc::Rc;
 
 use crate::cmd::{bool_int_result, int_result, parse_i64, Command};
-use crate::db::Database;
 use crate::error::{RedisError, Result};
 use crate::proto::Frame;
+use crate::SharedDb;
 
 pub fn parse_sadd(args: &[Bytes]) -> Result<Command> {
     if args.len() < 2 {
@@ -164,26 +163,26 @@ pub fn parse_smove(args: &[Bytes]) -> Result<Command> {
 
 pub fn execute(
     cmd: Command,
-    db: &Arc<Mutex<Database>>,
+    db: &SharedDb,
     db_index: &mut usize,
-    script_engine: &Arc<crate::script::ScriptEngine>,
+    script_engine: &Rc<crate::script::ScriptEngine>,
 ) -> Frame {
     match cmd {
         Command::SAdd(key, members) => {
-            int_result(db.lock().sadd(*db_index, &key, members).map(|n| n as i64))
+            int_result(db.borrow_mut().sadd(*db_index, &key, members).map(|n| n as i64))
         }
         Command::SRem(key, members) => {
-            int_result(db.lock().srem(*db_index, &key, &members).map(|n| n as i64))
+            int_result(db.borrow_mut().srem(*db_index, &key, &members).map(|n| n as i64))
         }
-        Command::SMembers(key) => match db.lock().smembers(*db_index, &key) {
+        Command::SMembers(key) => match db.borrow_mut().smembers(*db_index, &key) {
             Ok(members) => Frame::Array(members.into_iter().map(Frame::bulk_str).collect()),
             Err(e) => Frame::from_error(&e),
         },
         Command::SIsMember(key, member) => {
-            bool_int_result(db.lock().sismember(*db_index, &key, &member))
+            bool_int_result(db.borrow_mut().sismember(*db_index, &key, &member))
         }
         Command::SMIsMember(key, members) => {
-            match db.lock().smismember(*db_index, &key, &members) {
+            match db.borrow_mut().smismember(*db_index, &key, &members) {
                 Ok(results) => Frame::Array(
                     results
                         .into_iter()
@@ -193,35 +192,35 @@ pub fn execute(
                 Err(e) => Frame::from_error(&e),
             }
         }
-        Command::SCard(key) => int_result(db.lock().scard(*db_index, &key).map(|n| n as i64)),
-        Command::SUnion(keys) => match db.lock().sunion(*db_index, &keys) {
+        Command::SCard(key) => int_result(db.borrow_mut().scard(*db_index, &key).map(|n| n as i64)),
+        Command::SUnion(keys) => match db.borrow_mut().sunion(*db_index, &keys) {
             Ok(members) => Frame::Array(members.into_iter().map(Frame::bulk_str).collect()),
             Err(e) => Frame::from_error(&e),
         },
-        Command::SInter(keys) => match db.lock().sinter(*db_index, &keys) {
+        Command::SInter(keys) => match db.borrow_mut().sinter(*db_index, &keys) {
             Ok(members) => Frame::Array(members.into_iter().map(Frame::bulk_str).collect()),
             Err(e) => Frame::from_error(&e),
         },
-        Command::SDiff(keys) => match db.lock().sdiff(*db_index, &keys) {
+        Command::SDiff(keys) => match db.borrow_mut().sdiff(*db_index, &keys) {
             Ok(members) => Frame::Array(members.into_iter().map(Frame::bulk_str).collect()),
             Err(e) => Frame::from_error(&e),
         },
         Command::SUnionStore(dst, keys) => int_result(
-            db.lock()
+            db.borrow_mut()
                 .sunionstore(*db_index, &dst, &keys)
                 .map(|n| n as i64),
         ),
         Command::SInterStore(dst, keys) => int_result(
-            db.lock()
+            db.borrow_mut()
                 .sinterstore(*db_index, &dst, &keys)
                 .map(|n| n as i64),
         ),
         Command::SDiffStore(dst, keys) => int_result(
-            db.lock()
+            db.borrow_mut()
                 .sdiffstore(*db_index, &dst, &keys)
                 .map(|n| n as i64),
         ),
-        Command::SPop(key, count) => match db.lock().spop(*db_index, &key, count) {
+        Command::SPop(key, count) => match db.borrow_mut().spop(*db_index, &key, count) {
             Ok(members) if count == 1 => match members.into_iter().next() {
                 Some(m) => Frame::bulk_str(m),
                 None => Frame::Null,
@@ -229,7 +228,7 @@ pub fn execute(
             Ok(members) => Frame::Array(members.into_iter().map(Frame::bulk_str).collect()),
             Err(e) => Frame::from_error(&e),
         },
-        Command::SRandMember(key, count) => match db.lock().srandmember(*db_index, &key, count) {
+        Command::SRandMember(key, count) => match db.borrow_mut().srandmember(*db_index, &key, count) {
             Ok(members) if count == 1 => match members.into_iter().next() {
                 Some(m) => Frame::bulk_str(m),
                 None => Frame::Null,
@@ -238,7 +237,7 @@ pub fn execute(
             Err(e) => Frame::from_error(&e),
         },
         Command::SMove(src, dst, member) => {
-            bool_int_result(db.lock().smove(*db_index, &src, &dst, &member))
+            bool_int_result(db.borrow_mut().smove(*db_index, &src, &dst, &member))
         }
 
         cmd => crate::cmd::zset::execute(cmd, db, db_index, script_engine),

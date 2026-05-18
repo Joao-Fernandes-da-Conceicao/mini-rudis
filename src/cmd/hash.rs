@@ -1,11 +1,11 @@
 use bytes::Bytes;
-use parking_lot::Mutex;
-use std::sync::Arc;
+use std::rc::Rc;
 
 use crate::cmd::{bool_int_result, int_result, ok_result, parse_f64, parse_i64, Command};
-use crate::db::{format_float, Database};
+use crate::db::format_float;
 use crate::error::{RedisError, Result};
 use crate::proto::Frame;
+use crate::SharedDb;
 
 pub fn parse_hset(args: &[Bytes]) -> Result<Command> {
     if args.len() < 3 || args.len().is_multiple_of(2) {
@@ -140,25 +140,25 @@ pub fn parse_hincrbyfloat(args: &[Bytes]) -> Result<Command> {
 
 pub fn execute(
     cmd: Command,
-    db: &Arc<Mutex<Database>>,
+    db: &SharedDb,
     db_index: &mut usize,
-    script_engine: &Arc<crate::script::ScriptEngine>,
+    script_engine: &Rc<crate::script::ScriptEngine>,
 ) -> Frame {
     match cmd {
         Command::HSet(key, fields) => {
             let fields: Vec<(String, Vec<u8>)> =
                 fields.into_iter().map(|(f, v)| (f, v.to_vec())).collect();
-            int_result(db.lock().hset(*db_index, &key, fields).map(|n| n as i64))
+            int_result(db.borrow_mut().hset(*db_index, &key, fields).map(|n| n as i64))
         }
         Command::HSetnx(key, field, val) => {
-            bool_int_result(db.lock().hsetnx(*db_index, &key, &field, val.to_vec()))
+            bool_int_result(db.borrow_mut().hsetnx(*db_index, &key, &field, val.to_vec()))
         }
-        Command::HGet(key, field) => match db.lock().hget(*db_index, &key, &field) {
+        Command::HGet(key, field) => match db.borrow_mut().hget(*db_index, &key, &field) {
             Ok(Some(v)) => Frame::bulk_bytes(v),
             Ok(None) => Frame::Null,
             Err(e) => Frame::from_error(&e),
         },
-        Command::HMGet(key, fields) => match db.lock().hmget(*db_index, &key, &fields) {
+        Command::HMGet(key, fields) => match db.borrow_mut().hmget(*db_index, &key, &fields) {
             Ok(values) => Frame::Array(
                 values
                     .into_iter()
@@ -174,13 +174,13 @@ pub fn execute(
             // HMSET 与 HSET 行为相同（deprecated 但仍兼容）
             let fields: Vec<(String, Vec<u8>)> =
                 fields.into_iter().map(|(f, v)| (f, v.to_vec())).collect();
-            ok_result(db.lock().hset(*db_index, &key, fields).map(|_| ()))
+            ok_result(db.borrow_mut().hset(*db_index, &key, fields).map(|_| ()))
         }
         Command::HDel(key, fields) => {
-            int_result(db.lock().hdel(*db_index, &key, &fields).map(|n| n as i64))
+            int_result(db.borrow_mut().hdel(*db_index, &key, &fields).map(|n| n as i64))
         }
-        Command::HExists(key, field) => bool_int_result(db.lock().hexists(*db_index, &key, &field)),
-        Command::HGetAll(key) => match db.lock().hgetall(*db_index, &key) {
+        Command::HExists(key, field) => bool_int_result(db.borrow_mut().hexists(*db_index, &key, &field)),
+        Command::HGetAll(key) => match db.borrow_mut().hgetall(*db_index, &key) {
             Ok(pairs) => Frame::Array(
                 pairs
                     .into_iter()
@@ -189,20 +189,20 @@ pub fn execute(
             ),
             Err(e) => Frame::from_error(&e),
         },
-        Command::HKeys(key) => match db.lock().hkeys(*db_index, &key) {
+        Command::HKeys(key) => match db.borrow_mut().hkeys(*db_index, &key) {
             Ok(keys) => Frame::Array(keys.into_iter().map(Frame::bulk_str).collect()),
             Err(e) => Frame::from_error(&e),
         },
-        Command::HVals(key) => match db.lock().hvals(*db_index, &key) {
+        Command::HVals(key) => match db.borrow_mut().hvals(*db_index, &key) {
             Ok(vals) => Frame::Array(vals.into_iter().map(Frame::bulk_bytes).collect()),
             Err(e) => Frame::from_error(&e),
         },
-        Command::HLen(key) => int_result(db.lock().hlen(*db_index, &key).map(|n| n as i64)),
+        Command::HLen(key) => int_result(db.borrow_mut().hlen(*db_index, &key).map(|n| n as i64)),
         Command::HIncrBy(key, field, delta) => {
-            int_result(db.lock().hincrby(*db_index, &key, &field, delta))
+            int_result(db.borrow_mut().hincrby(*db_index, &key, &field, delta))
         }
         Command::HIncrByFloat(key, field, delta) => {
-            match db.lock().hincrbyfloat(*db_index, &key, &field, delta) {
+            match db.borrow_mut().hincrbyfloat(*db_index, &key, &field, delta) {
                 Ok(v) => Frame::bulk_str(format_float(v)),
                 Err(e) => Frame::from_error(&e),
             }

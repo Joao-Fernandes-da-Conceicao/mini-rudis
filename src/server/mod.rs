@@ -1,15 +1,19 @@
 /// TCP 服务器模块
+///
+/// 使用 **`tokio` current-thread scheduler + `spawn_local`**：所有连接任务与过期淘汰在同一线程
+/// 上轮询，数据库为 `Rc<RefCell<Database>>`，**命令路径无 Mutex**，与 Redis 单线程模型一致。
 pub mod handler;
 
-use std::sync::Arc;
+use std::cell::RefCell;
+use std::rc::Rc;
 use std::time::Duration;
 
-use parking_lot::Mutex;
 use tokio::net::TcpListener;
 use tracing::{error, info};
 
 use crate::db::Database;
 use crate::script::ScriptEngine;
+use crate::SharedDb;
 
 /// 服务器配置
 #[derive(Debug, Clone)]
@@ -32,23 +36,25 @@ impl Default for ServerConfig {
     }
 }
 
-/// 启动 mini-rudis TCP 服务器
+/// 必须在 [`tokio::task::LocalSet`] 上下文中 `.await` 调用。
 pub async fn run(config: ServerConfig) -> std::io::Result<()> {
     let addr = format!("{}:{}", config.host, config.port);
     let listener = TcpListener::bind(&addr).await?;
-    info!("mini-rudis listening on {}", addr);
+    info!(
+        "mini-rudis listening on {} (single-thread executor, lock-free command path)",
+        addr
+    );
 
-    let db = Arc::new(Mutex::new(Database::new(config.db_count)));
-    let script_engine = Arc::new(ScriptEngine::new());
+    let db: SharedDb = Rc::new(RefCell::new(Database::new(config.db_count)));
+    let script_engine = Rc::new(ScriptEngine::new());
 
-    // 后台定期清理过期键的任务
-    let db_bg = Arc::clone(&db);
+    let db_bg = Rc::clone(&db);
     let interval_ms = config.eviction_interval_ms;
-    tokio::spawn(async move {
+    tokio::task::spawn_local(async move {
         let mut interval = tokio::time::interval(Duration::from_millis(interval_ms));
         loop {
             interval.tick().await;
-            db_bg.lock().evict_expired();
+            db_bg.borrow_mut().evict_expired();
         }
     });
 
@@ -62,11 +68,10 @@ pub async fn run(config: ServerConfig) -> std::io::Result<()> {
         };
         info!("new connection: {}", peer_addr);
 
-        let db = Arc::clone(&db);
-        let script_engine = Arc::clone(&script_engine);
-        tokio::spawn(async move {
-            if let Err(e) = handler::handle_connection(socket, db, script_engine).await {
-                // 客户端断开连接是正常情况，只记录非 EOF 错误
+        let db_conn = Rc::clone(&db);
+        let se = Rc::clone(&script_engine);
+        tokio::task::spawn_local(async move {
+            if let Err(e) = handler::handle_connection(socket, db_conn, se).await {
                 let err_str = e.to_string();
                 if !err_str.contains("connection reset") && !err_str.contains("eof") {
                     error!("connection error ({}): {}", peer_addr, e);

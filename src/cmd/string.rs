@@ -1,15 +1,15 @@
 use bytes::Bytes;
-use parking_lot::Mutex;
-use std::sync::Arc;
+use std::rc::Rc;
 use std::time::Duration;
 
 use crate::cmd::{
     bool_int_result, int_result, null_or_bulk, ok_result, parse_f64, parse_i64, parse_usize,
     Command,
 };
-use crate::db::{format_float, Database};
+use crate::db::format_float;
 use crate::error::{RedisError, Result};
 use crate::proto::Frame;
+use crate::SharedDb;
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  SET 命令参数结构
@@ -335,24 +335,24 @@ pub fn parse_setrange(args: &[Bytes]) -> Result<Command> {
 
 pub fn execute(
     cmd: Command,
-    db: &Arc<Mutex<Database>>,
+    db: &SharedDb,
     db_index: &mut usize,
-    script_engine: &Arc<crate::script::ScriptEngine>,
+    script_engine: &Rc<crate::script::ScriptEngine>,
 ) -> Frame {
     match cmd {
         Command::Set(args) => exec_set(args, db, *db_index),
-        Command::Get(key) => null_or_bulk(db.lock().str_get(*db_index, &key)),
+        Command::Get(key) => null_or_bulk(db.borrow_mut().str_get(*db_index, &key)),
         Command::GetSet(key, val) => {
-            null_or_bulk(db.lock().str_getset(*db_index, key, val.to_vec()))
+            null_or_bulk(db.borrow_mut().str_getset(*db_index, key, val.to_vec()))
         }
-        Command::GetDel(key) => null_or_bulk(db.lock().str_getdel(*db_index, &key)),
+        Command::GetDel(key) => null_or_bulk(db.borrow_mut().str_getdel(*db_index, &key)),
         Command::GetEx(args) => exec_getex(args, db, *db_index),
         Command::Mset(pairs) => {
             let pairs: Vec<(String, Vec<u8>)> =
                 pairs.into_iter().map(|(k, v)| (k, v.to_vec())).collect();
-            ok_result(db.lock().mset(*db_index, pairs))
+            ok_result(db.borrow_mut().mset(*db_index, pairs))
         }
-        Command::Mget(keys) => match db.lock().mget(*db_index, &keys) {
+        Command::Mget(keys) => match db.borrow_mut().mget(*db_index, &keys) {
             Ok(values) => Frame::Array(
                 values
                     .into_iter()
@@ -367,47 +367,47 @@ pub fn execute(
         Command::Msetnx(pairs) => {
             let pairs: Vec<(String, Vec<u8>)> =
                 pairs.into_iter().map(|(k, v)| (k, v.to_vec())).collect();
-            bool_int_result(db.lock().msetnx(*db_index, pairs))
+            bool_int_result(db.borrow_mut().msetnx(*db_index, pairs))
         }
         Command::Setnx(key, val) => {
-            bool_int_result(db.lock().str_setnx(*db_index, key, val.to_vec()))
+            bool_int_result(db.borrow_mut().str_setnx(*db_index, key, val.to_vec()))
         }
-        Command::Setex(key, secs, val) => ok_result(db.lock().str_set(
+        Command::Setex(key, secs, val) => ok_result(db.borrow_mut().str_set(
             *db_index,
             key,
             val.to_vec(),
             Some(Duration::from_secs(secs as u64)),
         )),
-        Command::PSetex(key, ms, val) => ok_result(db.lock().str_set(
+        Command::PSetex(key, ms, val) => ok_result(db.borrow_mut().str_set(
             *db_index,
             key,
             val.to_vec(),
             Some(Duration::from_millis(ms as u64)),
         )),
-        Command::Incr(key) => int_result(db.lock().str_incr(*db_index, &key, 1)),
-        Command::IncrBy(key, delta) => int_result(db.lock().str_incr(*db_index, &key, delta)),
+        Command::Incr(key) => int_result(db.borrow_mut().str_incr(*db_index, &key, 1)),
+        Command::IncrBy(key, delta) => int_result(db.borrow_mut().str_incr(*db_index, &key, delta)),
         Command::IncrByFloat(key, delta) => {
-            match db.lock().str_incr_float(*db_index, &key, delta) {
+            match db.borrow_mut().str_incr_float(*db_index, &key, delta) {
                 Ok(v) => Frame::bulk_str(format_float(v)),
                 Err(e) => Frame::from_error(&e),
             }
         }
-        Command::Decr(key) => int_result(db.lock().str_incr(*db_index, &key, -1)),
-        Command::DecrBy(key, delta) => int_result(db.lock().str_incr(*db_index, &key, -delta)),
+        Command::Decr(key) => int_result(db.borrow_mut().str_incr(*db_index, &key, -1)),
+        Command::DecrBy(key, delta) => int_result(db.borrow_mut().str_incr(*db_index, &key, -delta)),
         Command::Append(key, val) => int_result(
-            db.lock()
+            db.borrow_mut()
                 .str_append(*db_index, &key, &val)
                 .map(|n| n as i64),
         ),
-        Command::Strlen(key) => int_result(db.lock().str_strlen(*db_index, &key).map(|n| n as i64)),
+        Command::Strlen(key) => int_result(db.borrow_mut().str_strlen(*db_index, &key).map(|n| n as i64)),
         Command::GetRange(key, start, end) => {
-            match db.lock().str_getrange(*db_index, &key, start, end) {
+            match db.borrow_mut().str_getrange(*db_index, &key, start, end) {
                 Ok(v) => Frame::bulk_bytes(v),
                 Err(e) => Frame::from_error(&e),
             }
         }
         Command::SetRange(key, offset, val) => int_result(
-            db.lock()
+            db.borrow_mut()
                 .str_setrange(*db_index, &key, offset, &val)
                 .map(|n| n as i64),
         ),
@@ -417,10 +417,10 @@ pub fn execute(
     }
 }
 
-fn exec_set(args: SetArgs, db: &Arc<Mutex<Database>>, db_index: usize) -> Frame {
-    let mut locked = db.lock();
+fn exec_set(args: SetArgs, db: &SharedDb, db_index: usize) -> Frame {
+    let mut borrowed = db.borrow_mut();
     let old_val = if args.get {
-        match locked.str_get(db_index, &args.key) {
+        match borrowed.str_get(db_index, &args.key) {
             Ok(v) => v,
             Err(e) => return Frame::from_error(&e),
         }
@@ -429,19 +429,19 @@ fn exec_set(args: SetArgs, db: &Arc<Mutex<Database>>, db_index: usize) -> Frame 
     };
 
     let result = if args.nx {
-        match locked.str_setnx(db_index, args.key.clone(), args.value.to_vec()) {
+        match borrowed.str_setnx(db_index, args.key.clone(), args.value.to_vec()) {
             Ok(true) => {
                 if let Some(exp) = args.expire {
-                    let _ = locked.expire(db_index, &args.key, exp.as_secs() as i64);
+                    let _ = borrowed.expire(db_index, &args.key, exp.as_secs() as i64);
                 }
                 Ok(true)
             }
             other => other,
         }
     } else if args.xx {
-        locked.str_setxx(db_index, args.key, args.value.to_vec(), args.expire)
+        borrowed.str_setxx(db_index, args.key, args.value.to_vec(), args.expire)
     } else {
-        locked
+        borrowed
             .str_set(db_index, args.key, args.value.to_vec(), args.expire)
             .map(|_| true)
     };
@@ -462,9 +462,9 @@ fn exec_set(args: SetArgs, db: &Arc<Mutex<Database>>, db_index: usize) -> Frame 
     }
 }
 
-fn exec_getex(args: GetExArgs, db: &Arc<Mutex<Database>>, db_index: usize) -> Frame {
-    let mut locked = db.lock();
-    let val = match locked.str_get(db_index, &args.key) {
+fn exec_getex(args: GetExArgs, db: &SharedDb, db_index: usize) -> Frame {
+    let mut borrowed = db.borrow_mut();
+    let val = match borrowed.str_get(db_index, &args.key) {
         Ok(v) => v,
         Err(e) => return Frame::from_error(&e),
     };
@@ -472,9 +472,9 @@ fn exec_getex(args: GetExArgs, db: &Arc<Mutex<Database>>, db_index: usize) -> Fr
         return Frame::Null;
     }
     if args.persist {
-        let _ = locked.persist(db_index, &args.key);
+        let _ = borrowed.persist(db_index, &args.key);
     } else if let Some(exp) = args.expire {
-        let _ = locked.pexpire(db_index, &args.key, exp.as_millis() as i64);
+        let _ = borrowed.pexpire(db_index, &args.key, exp.as_millis() as i64);
     }
     Frame::bulk_bytes(val.unwrap())
 }

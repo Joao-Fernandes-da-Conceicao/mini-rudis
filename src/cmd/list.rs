@@ -1,11 +1,10 @@
 use bytes::Bytes;
-use parking_lot::Mutex;
-use std::sync::Arc;
+use std::rc::Rc;
 
 use crate::cmd::{bulk_array, int_result, ok_result, parse_i64, parse_usize, Command};
-use crate::db::Database;
 use crate::error::{RedisError, Result};
 use crate::proto::Frame;
+use crate::SharedDb;
 
 pub fn parse_push(args: &[Bytes], left: bool, x: bool) -> Result<Command> {
     if args.len() < 2 {
@@ -144,67 +143,67 @@ pub fn parse_lmove(args: &[Bytes]) -> Result<Command> {
 
 pub fn execute(
     cmd: Command,
-    db: &Arc<Mutex<Database>>,
+    db: &SharedDb,
     db_index: &mut usize,
-    script_engine: &Arc<crate::script::ScriptEngine>,
+    script_engine: &Rc<crate::script::ScriptEngine>,
 ) -> Frame {
     match cmd {
         Command::LPush(key, vals) => {
             let vals: Vec<Vec<u8>> = vals.into_iter().map(|b| b.to_vec()).collect();
-            int_result(db.lock().lpush(*db_index, &key, vals).map(|n| n as i64))
+            int_result(db.borrow_mut().lpush(*db_index, &key, vals).map(|n| n as i64))
         }
         Command::RPush(key, vals) => {
             let vals: Vec<Vec<u8>> = vals.into_iter().map(|b| b.to_vec()).collect();
-            int_result(db.lock().rpush(*db_index, &key, vals).map(|n| n as i64))
+            int_result(db.borrow_mut().rpush(*db_index, &key, vals).map(|n| n as i64))
         }
         Command::LPushX(key, vals) => {
             let vals: Vec<Vec<u8>> = vals.into_iter().map(|b| b.to_vec()).collect();
-            int_result(db.lock().lpushx(*db_index, &key, vals).map(|n| n as i64))
+            int_result(db.borrow_mut().lpushx(*db_index, &key, vals).map(|n| n as i64))
         }
         Command::RPushX(key, vals) => {
             let vals: Vec<Vec<u8>> = vals.into_iter().map(|b| b.to_vec()).collect();
-            int_result(db.lock().rpushx(*db_index, &key, vals).map(|n| n as i64))
+            int_result(db.borrow_mut().rpushx(*db_index, &key, vals).map(|n| n as i64))
         }
         Command::LPop(key, count) => {
-            let mut locked = db.lock();
-            let result = locked.lpop(*db_index, &key, count);
-            drop(locked);
+            let mut borrowed = db.borrow_mut();
+            let result = borrowed.lpop(*db_index, &key, count);
+            drop(borrowed);
             exec_pop_result(result, count == 1)
         }
         Command::RPop(key, count) => {
-            let mut locked = db.lock();
-            let result = locked.rpop(*db_index, &key, count);
-            drop(locked);
+            let mut borrowed = db.borrow_mut();
+            let result = borrowed.rpop(*db_index, &key, count);
+            drop(borrowed);
             exec_pop_result(result, count == 1)
         }
-        Command::LLen(key) => int_result(db.lock().llen(*db_index, &key).map(|n| n as i64)),
+        Command::LLen(key) => int_result(db.borrow_mut().llen(*db_index, &key).map(|n| n as i64)),
         Command::LRange(key, start, stop) => {
-            bulk_array(db.lock().lrange(*db_index, &key, start, stop))
+            bulk_array(db.borrow_mut().lrange(*db_index, &key, start, stop))
         }
-        Command::LIndex(key, index) => match db.lock().lindex(*db_index, &key, index) {
+        Command::LIndex(key, index) => match db.borrow_mut().lindex(*db_index, &key, index) {
             Ok(Some(v)) => Frame::bulk_bytes(v),
             Ok(None) => Frame::Null,
             Err(e) => Frame::from_error(&e),
         },
         Command::LSet(key, index, val) => {
-            ok_result(db.lock().lset(*db_index, &key, index, val.to_vec()))
+            ok_result(db.borrow_mut().lset(*db_index, &key, index, val.to_vec()))
         }
         Command::LInsert(key, before, pivot, value) => {
             int_result(
-                db.lock()
+                db.borrow_mut()
                     .linsert(*db_index, &key, before, &pivot, value.to_vec()),
             )
         }
         Command::LRem(key, count, val) => int_result(
-            db.lock()
+            db.borrow_mut()
                 .lrem(*db_index, &key, count, &val)
                 .map(|n| n as i64),
         ),
         Command::LTrim(key, start, stop) => {
-            ok_result(db.lock().ltrim(*db_index, &key, start, stop))
+            ok_result(db.borrow_mut().ltrim(*db_index, &key, start, stop))
         }
         Command::LMove(src, dst, src_left, dst_left) => {
-            match db.lock().lmove(*db_index, &src, &dst, src_left, dst_left) {
+            match db.borrow_mut().lmove(*db_index, &src, &dst, src_left, dst_left) {
                 Ok(Some(v)) => Frame::bulk_bytes(v),
                 Ok(None) => Frame::Null,
                 Err(e) => Frame::from_error(&e),

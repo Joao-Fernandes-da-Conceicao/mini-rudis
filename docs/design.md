@@ -53,15 +53,15 @@ mini-rudis 是一个用 Rust 实现的单机 Redis 兼容缓存服务器，支�
 使用 `HashSet<String>`，O(1) 成员判断，支持集合运算（并/交/差）。
 
 ### ZSet（有序集合）
-双索引设计：
+双索引设计（对齐 Redis `dict` + `skiplist`）：
 ```rust
 pub struct ZSetInner {
-    scores: HashMap<String, f64>,                        // member → score，O(1) 分数查询
-    sorted: BTreeMap<(OrderedFloat<f64>, String), ()>,   // (score, member) → ()，O(log n) 范围查询
+    scores: HashMap<String, f64>,   // member → score，O(1) 单点查询
+    sl: SkipList,                   // (score, member) 有序跳表，O(log n) 插入/删除
 }
 ```
-- `scores`：O(1) ZSCORE 查询
-- `sorted`：利用 `BTreeMap` 天然有序性，支持 ZRANGE / ZRANGEBYSCORE / ZRANK 等范围命令
+- `scores`：O(1) ZSCORE / 更新前旧分查找
+- `sl`：跳表（`ZSKIPLIST_MAXLEVEL=32`，`P=0.25`），支持 ZRANGE / ZRANGEBYSCORE / ZRANK 等范围与排名命令
 
 ### TTL 实现
 每个逻辑数据库维护独立的过期时间表：

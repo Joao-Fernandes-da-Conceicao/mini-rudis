@@ -1,10 +1,12 @@
 /// 数据库核心层
 ///
 /// 支持 5 种 Redis 数据类型 + TTL 过期机制 + 16 个逻辑数据库
-use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
+mod skiplist;
+
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::time::{Duration, Instant};
 
-use ordered_float::OrderedFloat;
+use skiplist::SkipList;
 
 use crate::error::{RedisError, Result};
 
@@ -30,14 +32,14 @@ impl RudisObject {
     }
 }
 
-/// 有序集合内部数据结构
+/// 有序集合内部数据结构（对齐 Redis：dict + skiplist）
 ///
-/// `scores` 提供 O(1) member→score 查找；
-/// `sorted` 以 (score, member) 为键维护排序索引，支持高效范围查询。
+/// - `scores`：member → score，O(1) 单点查询（ZSCORE / ZRANK 前置）
+/// - `sl`：按 (score, member) 有序的跳表，O(log n) 插入/删除，均摊 O(log n) 范围定位
 #[derive(Debug, Clone, Default)]
 pub struct ZSetInner {
     pub scores: HashMap<String, f64>,
-    pub sorted: BTreeMap<(OrderedFloat<f64>, String), ()>,
+    pub sl: SkipList,
 }
 
 impl ZSetInner {
@@ -48,18 +50,16 @@ impl ZSetInner {
     /// 添加或更新成员，返回是否为新增（true）还是更新（false）
     pub fn add(&mut self, member: String, score: f64) -> bool {
         if let Some(&old_score) = self.scores.get(&member) {
-            self.sorted
-                .remove(&(OrderedFloat(old_score), member.clone()));
+            self.sl.remove(old_score, &member);
         }
         let is_new = self.scores.insert(member.clone(), score).is_none();
-        self.sorted.insert((OrderedFloat(score), member), ());
+        self.sl.insert(score, member);
         is_new
     }
 
     pub fn remove(&mut self, member: &str) -> bool {
         if let Some(score) = self.scores.remove(member) {
-            self.sorted
-                .remove(&(OrderedFloat(score), member.to_owned()));
+            self.sl.remove(score, member);
             true
         } else {
             false
@@ -81,11 +81,7 @@ impl ZSetInner {
     /// 返回从小到大第 rank 名（0-indexed），不存在返回 None
     pub fn rank(&self, member: &str) -> Option<usize> {
         let score = *self.scores.get(member)?;
-        let rank = self
-            .sorted
-            .range(..(OrderedFloat(score), member.to_owned()))
-            .count();
-        Some(rank)
+        self.sl.rank_of(score, member)
     }
 
     /// 返回从大到小第 rank 名（0-indexed）
@@ -107,16 +103,11 @@ impl ZSetInner {
         if start > stop {
             return vec![];
         }
-        self.sorted
+        self.sl
             .iter()
             .skip(start)
             .take(stop - start + 1)
-            .map(|((score, member), _)| {
-                (
-                    member.clone(),
-                    if withscores { Some(score.0) } else { None },
-                )
-            })
+            .map(|(member, score)| (member, if withscores { Some(score) } else { None }))
             .collect()
     }
 
@@ -129,19 +120,12 @@ impl ZSetInner {
         offset: usize,
         count: Option<usize>,
     ) -> Vec<(String, Option<f64>)> {
-        let iter = self
-            .sorted
+        self.sl
             .iter()
-            .filter(|((score, _), _)| min.contains(score.0) && max.contains_upper(score.0));
-        let iter: Box<dyn Iterator<Item = _>> = Box::new(iter);
-        iter.skip(offset)
+            .filter(|(_, score)| min.contains(*score) && max.contains_upper(*score))
+            .skip(offset)
             .take(count.unwrap_or(usize::MAX))
-            .map(|((score, member), _)| {
-                (
-                    member.clone(),
-                    if withscores { Some(score.0) } else { None },
-                )
-            })
+            .map(|(member, score)| (member, if withscores { Some(score) } else { None }))
             .collect()
     }
 
@@ -154,38 +138,30 @@ impl ZSetInner {
         offset: usize,
         count: Option<usize>,
     ) -> Vec<(String, Option<f64>)> {
-        let iter = self
-            .sorted
-            .iter()
-            .rev()
-            .filter(|((score, _), _)| min.contains(score.0) && max.contains_upper(score.0));
-        let iter: Box<dyn Iterator<Item = _>> = Box::new(iter);
-        iter.skip(offset)
+        self.sl
+            .iter_rev()
+            .filter(|(_, score)| min.contains(*score) && max.contains_upper(*score))
+            .skip(offset)
             .take(count.unwrap_or(usize::MAX))
-            .map(|((score, member), _)| {
-                (
-                    member.clone(),
-                    if withscores { Some(score.0) } else { None },
-                )
-            })
+            .map(|(member, score)| (member, if withscores { Some(score) } else { None }))
             .collect()
     }
 
     /// 统计分数在 [min, max] 范围内的元素数
     pub fn count_by_score(&self, min: ScoreBound, max: ScoreBound) -> usize {
-        self.sorted
+        self.sl
             .iter()
-            .filter(|((score, _), _)| min.contains(score.0) && max.contains_upper(score.0))
+            .filter(|(_, score)| min.contains(*score) && max.contains_upper(*score))
             .count()
     }
 
     /// 移除分数在范围内的元素，返回移除数量
     pub fn remove_by_score(&mut self, min: ScoreBound, max: ScoreBound) -> usize {
         let to_remove: Vec<_> = self
-            .sorted
+            .sl
             .iter()
-            .filter(|((score, _), _)| min.contains(score.0) && max.contains_upper(score.0))
-            .map(|((_, member), _)| member.clone())
+            .filter(|(_, score)| min.contains(*score) && max.contains_upper(*score))
+            .map(|(member, _)| member)
             .collect();
         let count = to_remove.len();
         for member in to_remove {
@@ -203,11 +179,11 @@ impl ZSetInner {
             return 0;
         }
         let to_remove: Vec<_> = self
-            .sorted
+            .sl
             .iter()
             .skip(start)
             .take(stop - start + 1)
-            .map(|((_, member), _)| member.clone())
+            .map(|(member, _)| member)
             .collect();
         let count = to_remove.len();
         for member in to_remove {
@@ -219,10 +195,10 @@ impl ZSetInner {
     /// 弹出分数最小的 count 个元素
     pub fn pop_min(&mut self, count: usize) -> Vec<(String, f64)> {
         let keys: Vec<_> = self
-            .sorted
+            .sl
             .iter()
             .take(count)
-            .map(|((score, member), _)| (member.clone(), score.0))
+            .map(|(member, score)| (member, score))
             .collect();
         for (member, _) in &keys {
             self.remove(member);
@@ -233,11 +209,10 @@ impl ZSetInner {
     /// 弹出分数最大的 count 个元素
     pub fn pop_max(&mut self, count: usize) -> Vec<(String, f64)> {
         let keys: Vec<_> = self
-            .sorted
-            .iter()
-            .rev()
+            .sl
+            .iter_rev()
             .take(count)
-            .map(|((score, member), _)| (member.clone(), score.0))
+            .map(|(member, score)| (member, score))
             .collect();
         for (member, _) in &keys {
             self.remove(member);

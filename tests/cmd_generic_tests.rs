@@ -14,10 +14,7 @@ fn cmd_del_single() {
     let mut idx = 0;
     run_cmd(&db, &se, &mut idx, &["SET", "k", "v"]);
     assert_int_eq(&run_cmd(&db, &se, &mut idx, &["DEL", "k"]), 1);
-    assert_eq!(
-        run_cmd(&db, &se, &mut idx, &["GET", "k"]),
-        Frame::Null
-    );
+    assert_eq!(run_cmd(&db, &se, &mut idx, &["GET", "k"]), Frame::Null);
 }
 
 #[test]
@@ -53,12 +50,7 @@ fn cmd_type_of() {
     run_cmd(&db, &se, &mut idx, &["LPUSH", "list", "v"]);
     run_cmd(&db, &se, &mut idx, &["HSET", "hash", "f", "v"]);
     run_cmd(&db, &se, &mut idx, &["SADD", "set", "m"]);
-    run_cmd(
-        &db,
-        &se,
-        &mut idx,
-        &["ZADD", "zset", "1", "m"],
-    );
+    run_cmd(&db, &se, &mut idx, &["ZADD", "zset", "1", "m"]);
     assert_eq!(
         run_cmd(&db, &se, &mut idx, &["TYPE", "str"]),
         Frame::Simple("string".into())
@@ -92,10 +84,7 @@ fn cmd_rename() {
     let mut idx = 0;
     run_cmd(&db, &se, &mut idx, &["SET", "old", "value"]);
     assert_ok(&run_cmd(&db, &se, &mut idx, &["RENAME", "old", "new"]));
-    assert_eq!(
-        run_cmd(&db, &se, &mut idx, &["GET", "old"]),
-        Frame::Null
-    );
+    assert_eq!(run_cmd(&db, &se, &mut idx, &["GET", "old"]), Frame::Null);
     assert_bulk_eq(&run_cmd(&db, &se, &mut idx, &["GET", "new"]), "value");
 }
 
@@ -177,12 +166,7 @@ fn cmd_keys_pattern() {
     run_cmd(&db, &se, &mut idx, &["SET", "user:1", "a"]);
     run_cmd(&db, &se, &mut idx, &["SET", "user:2", "b"]);
     run_cmd(&db, &se, &mut idx, &["SET", "post:1", "c"]);
-    let mut k = frame_array_all_bulk(run_cmd(
-        &db,
-        &se,
-        &mut idx,
-        &["KEYS", "user:*"],
-    ));
+    let mut k = frame_array_all_bulk(run_cmd(&db, &se, &mut idx, &["KEYS", "user:*"]));
     k.sort();
     assert_eq!(k, vec!["user:1", "user:2"]);
     let all = frame_array_all_bulk(run_cmd(&db, &se, &mut idx, &["KEYS", "*"]));
@@ -227,17 +211,9 @@ fn cmd_key_expires_lazily() {
     let db = shared_db();
     let se = script_engine();
     let mut idx = 0;
-    assert_ok(&run_cmd(
-        &db,
-        &se,
-        &mut idx,
-        &["SET", "k", "v", "PX", "1"],
-    ));
+    assert_ok(&run_cmd(&db, &se, &mut idx, &["SET", "k", "v", "PX", "1"]));
     std::thread::sleep(Duration::from_millis(10));
-    assert_eq!(
-        run_cmd(&db, &se, &mut idx, &["GET", "k"]),
-        Frame::Null
-    );
+    assert_eq!(run_cmd(&db, &se, &mut idx, &["GET", "k"]), Frame::Null);
 }
 
 #[test]

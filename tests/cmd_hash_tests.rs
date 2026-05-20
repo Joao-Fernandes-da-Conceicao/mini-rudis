@@ -10,15 +10,13 @@ fn cmd_hset_hget() {
     let se = script_engine();
     let mut idx = 0;
     assert_int_eq(
-        &run_cmd(
-            &db,
-            &se,
-            &mut idx,
-            &["HSET", "h", "name", "Alice"],
-        ),
+        &run_cmd(&db, &se, &mut idx, &["HSET", "h", "name", "Alice"]),
         1,
     );
-    assert_bulk_eq(&run_cmd(&db, &se, &mut idx, &["HGET", "h", "name"]), "Alice");
+    assert_bulk_eq(
+        &run_cmd(&db, &se, &mut idx, &["HGET", "h", "name"]),
+        "Alice",
+    );
     assert_eq!(
         run_cmd(&db, &se, &mut idx, &["HGET", "h", "missing"]),
         Frame::Null
@@ -31,12 +29,7 @@ fn cmd_hset_multi() {
     let se = script_engine();
     let mut idx = 0;
     assert_int_eq(
-        &run_cmd(
-            &db,
-            &se,
-            &mut idx,
-            &["HSET", "h", "f1", "v1", "f2", "v2"],
-        ),
+        &run_cmd(&db, &se, &mut idx, &["HSET", "h", "f1", "v1", "f2", "v2"]),
         2,
     );
     assert_int_eq(&run_cmd(&db, &se, &mut idx, &["HLEN", "h"]), 2);
@@ -49,22 +42,12 @@ fn cmd_hsetnx() {
     let mut idx = 0;
     run_cmd(&db, &se, &mut idx, &["HSET", "h", "f", "old"]);
     assert_int_eq(
-        &run_cmd(
-            &db,
-            &se,
-            &mut idx,
-            &["HSETNX", "h", "f", "new"],
-        ),
+        &run_cmd(&db, &se, &mut idx, &["HSETNX", "h", "f", "new"]),
         0,
     );
     assert_bulk_eq(&run_cmd(&db, &se, &mut idx, &["HGET", "h", "f"]), "old");
     assert_int_eq(
-        &run_cmd(
-            &db,
-            &se,
-            &mut idx,
-            &["HSETNX", "h", "new_field", "val"],
-        ),
+        &run_cmd(&db, &se, &mut idx, &["HSETNX", "h", "new_field", "val"]),
         1,
     );
 }
@@ -155,12 +138,7 @@ fn cmd_hmget() {
     let se = script_engine();
     let mut idx = 0;
     run_cmd(&db, &se, &mut idx, &["HSET", "h", "a", "1"]);
-    let v = frame_array_bulks(run_cmd(
-        &db,
-        &se,
-        &mut idx,
-        &["HMGET", "h", "a", "b"],
-    ));
+    let v = frame_array_bulks(run_cmd(&db, &se, &mut idx, &["HMGET", "h", "a", "b"]));
     assert_eq!(v.len(), 2);
     assert_eq!(v[0].as_deref(), Some("1"));
     assert_eq!(v[1], None);

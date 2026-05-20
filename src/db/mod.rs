@@ -194,12 +194,7 @@ impl ZSetInner {
 
     /// 弹出分数最小的 count 个元素
     pub fn pop_min(&mut self, count: usize) -> Vec<(String, f64)> {
-        let keys: Vec<_> = self
-            .sl
-            .iter()
-            .take(count)
-            .map(|(member, score)| (member, score))
-            .collect();
+        let keys: Vec<_> = self.sl.iter().take(count).collect();
         for (member, _) in &keys {
             self.remove(member);
         }
@@ -208,12 +203,7 @@ impl ZSetInner {
 
     /// 弹出分数最大的 count 个元素
     pub fn pop_max(&mut self, count: usize) -> Vec<(String, f64)> {
-        let keys: Vec<_> = self
-            .sl
-            .iter_rev()
-            .take(count)
-            .map(|(member, score)| (member, score))
-            .collect();
+        let keys: Vec<_> = self.sl.iter_rev().take(count).collect();
         for (member, _) in &keys {
             self.remove(member);
         }

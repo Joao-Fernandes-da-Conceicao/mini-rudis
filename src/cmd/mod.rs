@@ -11,9 +11,9 @@ pub mod zset;
 use bytes::Bytes;
 use std::rc::Rc;
 
-use crate::SharedDb;
 use crate::error::{RedisError, Result};
 use crate::proto::Frame;
+use crate::SharedDb;
 
 /// 所有支持的命令枚举（按功能分类）
 #[derive(Debug)]
@@ -374,11 +374,19 @@ pub fn execute(
             Err(e) => Frame::from_error(&e),
         },
         Command::Rename(src, dst) => ok_result(db.borrow_mut().rename(*db_index, &src, &dst)),
-        Command::Renamenx(src, dst) => bool_int_result(db.borrow_mut().renamenx(*db_index, &src, &dst)),
-        Command::Expire(key, secs) => bool_int_result(db.borrow_mut().expire(*db_index, &key, secs)),
+        Command::Renamenx(src, dst) => {
+            bool_int_result(db.borrow_mut().renamenx(*db_index, &src, &dst))
+        }
+        Command::Expire(key, secs) => {
+            bool_int_result(db.borrow_mut().expire(*db_index, &key, secs))
+        }
         Command::PExpire(key, ms) => bool_int_result(db.borrow_mut().pexpire(*db_index, &key, ms)),
-        Command::ExpireAt(key, ts) => bool_int_result(db.borrow_mut().expireat(*db_index, &key, ts)),
-        Command::PExpireAt(key, ts) => bool_int_result(db.borrow_mut().pexpireat(*db_index, &key, ts)),
+        Command::ExpireAt(key, ts) => {
+            bool_int_result(db.borrow_mut().expireat(*db_index, &key, ts))
+        }
+        Command::PExpireAt(key, ts) => {
+            bool_int_result(db.borrow_mut().pexpireat(*db_index, &key, ts))
+        }
         Command::Ttl(key) => int_result(db.borrow_mut().ttl(*db_index, &key)),
         Command::Pttl(key) => int_result(db.borrow_mut().pttl(*db_index, &key)),
         Command::Persist(key) => bool_int_result(db.borrow_mut().persist(*db_index, &key)),

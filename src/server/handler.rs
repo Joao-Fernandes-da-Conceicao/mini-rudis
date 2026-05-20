@@ -54,10 +54,7 @@ pub async fn handle_connection(
                 continue;
             }
 
-            debug!(
-                "cmd: {}",
-                String::from_utf8_lossy(&args[0]).to_uppercase()
-            );
+            debug!("cmd: {}", String::from_utf8_lossy(&args[0]).to_uppercase());
 
             let response = match cmd::parse(&args) {
                 Ok(command) => {

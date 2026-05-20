@@ -393,13 +393,19 @@ pub fn execute(
             }
         }
         Command::Decr(key) => int_result(db.borrow_mut().str_incr(*db_index, &key, -1)),
-        Command::DecrBy(key, delta) => int_result(db.borrow_mut().str_incr(*db_index, &key, -delta)),
+        Command::DecrBy(key, delta) => {
+            int_result(db.borrow_mut().str_incr(*db_index, &key, -delta))
+        }
         Command::Append(key, val) => int_result(
             db.borrow_mut()
                 .str_append(*db_index, &key, &val)
                 .map(|n| n as i64),
         ),
-        Command::Strlen(key) => int_result(db.borrow_mut().str_strlen(*db_index, &key).map(|n| n as i64)),
+        Command::Strlen(key) => int_result(
+            db.borrow_mut()
+                .str_strlen(*db_index, &key)
+                .map(|n| n as i64),
+        ),
         Command::GetRange(key, start, end) => {
             match db.borrow_mut().str_getrange(*db_index, &key, start, end) {
                 Ok(v) => Frame::bulk_bytes(v),

@@ -168,12 +168,16 @@ pub fn execute(
     script_engine: &Rc<crate::script::ScriptEngine>,
 ) -> Frame {
     match cmd {
-        Command::SAdd(key, members) => {
-            int_result(db.borrow_mut().sadd(*db_index, &key, members).map(|n| n as i64))
-        }
-        Command::SRem(key, members) => {
-            int_result(db.borrow_mut().srem(*db_index, &key, &members).map(|n| n as i64))
-        }
+        Command::SAdd(key, members) => int_result(
+            db.borrow_mut()
+                .sadd(*db_index, &key, members)
+                .map(|n| n as i64),
+        ),
+        Command::SRem(key, members) => int_result(
+            db.borrow_mut()
+                .srem(*db_index, &key, &members)
+                .map(|n| n as i64),
+        ),
         Command::SMembers(key) => match db.borrow_mut().smembers(*db_index, &key) {
             Ok(members) => Frame::Array(members.into_iter().map(Frame::bulk_str).collect()),
             Err(e) => Frame::from_error(&e),
@@ -228,14 +232,16 @@ pub fn execute(
             Ok(members) => Frame::Array(members.into_iter().map(Frame::bulk_str).collect()),
             Err(e) => Frame::from_error(&e),
         },
-        Command::SRandMember(key, count) => match db.borrow_mut().srandmember(*db_index, &key, count) {
-            Ok(members) if count == 1 => match members.into_iter().next() {
-                Some(m) => Frame::bulk_str(m),
-                None => Frame::Null,
-            },
-            Ok(members) => Frame::Array(members.into_iter().map(Frame::bulk_str).collect()),
-            Err(e) => Frame::from_error(&e),
-        },
+        Command::SRandMember(key, count) => {
+            match db.borrow_mut().srandmember(*db_index, &key, count) {
+                Ok(members) if count == 1 => match members.into_iter().next() {
+                    Some(m) => Frame::bulk_str(m),
+                    None => Frame::Null,
+                },
+                Ok(members) => Frame::Array(members.into_iter().map(Frame::bulk_str).collect()),
+                Err(e) => Frame::from_error(&e),
+            }
+        }
         Command::SMove(src, dst, member) => {
             bool_int_result(db.borrow_mut().smove(*db_index, &src, &dst, &member))
         }

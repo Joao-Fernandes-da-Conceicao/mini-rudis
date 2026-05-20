@@ -93,12 +93,7 @@ fn cmd_zrange_zrevrange() {
         &mut idx,
         &["ZADD", "z", "1", "a", "2", "b", "3", "c", "4", "d"],
     );
-    let m = frame_array_all_bulk(run_cmd(
-        &db,
-        &se,
-        &mut idx,
-        &["ZRANGE", "z", "0", "2"],
-    ));
+    let m = frame_array_all_bulk(run_cmd(&db, &se, &mut idx, &["ZRANGE", "z", "0", "2"]));
     assert_eq!(m, vec!["a", "b", "c"]);
     let rev = frame_array_all_bulk(run_cmd(
         &db,
@@ -120,10 +115,7 @@ fn cmd_zrangebyscore_zcount() {
         &mut idx,
         &["ZADD", "z", "1", "a", "2", "b", "3", "c", "4", "d"],
     );
-    assert_int_eq(
-        &run_cmd(&db, &se, &mut idx, &["ZCOUNT", "z", "2", "3"]),
-        2,
-    );
+    assert_int_eq(&run_cmd(&db, &se, &mut idx, &["ZCOUNT", "z", "2", "3"]), 2);
     let m = frame_array_all_bulk(run_cmd(
         &db,
         &se,
@@ -138,7 +130,12 @@ fn cmd_zrangebyscore_exclusive_inf() {
     let db = shared_db();
     let se = script_engine();
     let mut idx = 0;
-    run_cmd(&db, &se, &mut idx, &["ZADD", "z", "1", "a", "2", "b", "3", "c"]);
+    run_cmd(
+        &db,
+        &se,
+        &mut idx,
+        &["ZADD", "z", "1", "a", "2", "b", "3", "c"],
+    );
     let m = frame_array_all_bulk(run_cmd(
         &db,
         &se,
@@ -187,19 +184,19 @@ fn cmd_zremrangebyrank_score() {
         &["ZADD", "z", "1", "a", "2", "b", "3", "c", "4", "d"],
     );
     assert_int_eq(
-        &run_cmd(
-            &db,
-            &se,
-            &mut idx,
-            &["ZREMRANGEBYRANK", "z", "1", "2"],
-        ),
+        &run_cmd(&db, &se, &mut idx, &["ZREMRANGEBYRANK", "z", "1", "2"]),
         2,
     );
     assert_int_eq(&run_cmd(&db, &se, &mut idx, &["ZCARD", "z"]), 2);
 
     let db2 = shared_db();
     let mut idx2 = 0;
-    run_cmd(&db2, &se, &mut idx2, &["ZADD", "z2", "1", "a", "2", "b", "3", "c"]);
+    run_cmd(
+        &db2,
+        &se,
+        &mut idx2,
+        &["ZADD", "z2", "1", "a", "2", "b", "3", "c"],
+    );
     assert_int_eq(
         &run_cmd(
             &db2,
@@ -209,10 +206,7 @@ fn cmd_zremrangebyrank_score() {
         ),
         2,
     );
-    assert_int_eq(
-        &run_cmd(&db2, &se, &mut idx2, &["ZCARD", "z2"]),
-        1,
-    );
+    assert_int_eq(&run_cmd(&db2, &se, &mut idx2, &["ZCARD", "z2"]), 1);
 }
 
 #[test]
@@ -221,12 +215,7 @@ fn cmd_zadd_nx() {
     let se = script_engine();
     let mut idx = 0;
     run_cmd(&db, &se, &mut idx, &["ZADD", "z", "1", "a"]);
-    run_cmd(
-        &db,
-        &se,
-        &mut idx,
-        &["ZADD", "z", "NX", "100", "a"],
-    );
+    run_cmd(&db, &se, &mut idx, &["ZADD", "z", "NX", "100", "a"]);
     assert_bulk_eq(&run_cmd(&db, &se, &mut idx, &["ZSCORE", "z", "a"]), "1");
 }
 

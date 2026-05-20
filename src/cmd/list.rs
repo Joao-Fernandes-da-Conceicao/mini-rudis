@@ -150,19 +150,35 @@ pub fn execute(
     match cmd {
         Command::LPush(key, vals) => {
             let vals: Vec<Vec<u8>> = vals.into_iter().map(|b| b.to_vec()).collect();
-            int_result(db.borrow_mut().lpush(*db_index, &key, vals).map(|n| n as i64))
+            int_result(
+                db.borrow_mut()
+                    .lpush(*db_index, &key, vals)
+                    .map(|n| n as i64),
+            )
         }
         Command::RPush(key, vals) => {
             let vals: Vec<Vec<u8>> = vals.into_iter().map(|b| b.to_vec()).collect();
-            int_result(db.borrow_mut().rpush(*db_index, &key, vals).map(|n| n as i64))
+            int_result(
+                db.borrow_mut()
+                    .rpush(*db_index, &key, vals)
+                    .map(|n| n as i64),
+            )
         }
         Command::LPushX(key, vals) => {
             let vals: Vec<Vec<u8>> = vals.into_iter().map(|b| b.to_vec()).collect();
-            int_result(db.borrow_mut().lpushx(*db_index, &key, vals).map(|n| n as i64))
+            int_result(
+                db.borrow_mut()
+                    .lpushx(*db_index, &key, vals)
+                    .map(|n| n as i64),
+            )
         }
         Command::RPushX(key, vals) => {
             let vals: Vec<Vec<u8>> = vals.into_iter().map(|b| b.to_vec()).collect();
-            int_result(db.borrow_mut().rpushx(*db_index, &key, vals).map(|n| n as i64))
+            int_result(
+                db.borrow_mut()
+                    .rpushx(*db_index, &key, vals)
+                    .map(|n| n as i64),
+            )
         }
         Command::LPop(key, count) => {
             let mut borrowed = db.borrow_mut();
@@ -203,7 +219,10 @@ pub fn execute(
             ok_result(db.borrow_mut().ltrim(*db_index, &key, start, stop))
         }
         Command::LMove(src, dst, src_left, dst_left) => {
-            match db.borrow_mut().lmove(*db_index, &src, &dst, src_left, dst_left) {
+            match db
+                .borrow_mut()
+                .lmove(*db_index, &src, &dst, src_left, dst_left)
+            {
                 Ok(Some(v)) => Frame::bulk_bytes(v),
                 Ok(None) => Frame::Null,
                 Err(e) => Frame::from_error(&e),

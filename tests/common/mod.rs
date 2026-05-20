@@ -25,12 +25,7 @@ pub fn argv(parts: &[&str]) -> Vec<Bytes> {
         .collect()
 }
 
-pub fn run_cmd(
-    db: &SharedDb,
-    se: &Rc<ScriptEngine>,
-    idx: &mut usize,
-    parts: &[&str],
-) -> Frame {
+pub fn run_cmd(db: &SharedDb, se: &Rc<ScriptEngine>, idx: &mut usize, parts: &[&str]) -> Frame {
     let cmd = parse(&argv(parts)).expect("parse");
     execute(cmd, db, idx, se)
 }
@@ -107,8 +102,5 @@ pub fn bulk_float_approx(f: &Frame, expected: f64) {
         Frame::Bulk(b) => std::str::from_utf8(b).unwrap().parse::<f64>().unwrap(),
         other => panic!("expected Bulk float: {other:?}"),
     };
-    assert!(
-        (s - expected).abs() < 1e-5,
-        "got {s}, expected ~{expected}"
-    );
+    assert!((s - expected).abs() < 1e-5, "got {s}, expected ~{expected}");
 }

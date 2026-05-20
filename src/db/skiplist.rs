@@ -85,9 +85,7 @@ impl SkipList {
 
         let lvl = random_level();
         if lvl > self.level {
-            for i in self.level..lvl {
-                update[i] = 0;
-            }
+            update[self.level..lvl].fill(0);
             self.level = lvl;
         }
 
@@ -98,9 +96,9 @@ impl SkipList {
             forward: vec![NIL; lvl],
         });
 
-        for i in 0..lvl {
-            self.nodes[idx].forward[i] = self.nodes[update[i]].forward[i];
-            self.nodes[update[i]].forward[i] = idx;
+        for (i, &pred) in update.iter().enumerate().take(lvl) {
+            self.nodes[idx].forward[i] = self.nodes[pred].forward[i];
+            self.nodes[pred].forward[i] = idx;
         }
         self.length += 1;
     }
@@ -134,11 +132,11 @@ impl SkipList {
             return false;
         }
 
-        for i in 0..self.level {
-            if self.nodes[update[i]].forward[i] != target {
+        for (i, &pred) in update.iter().enumerate().take(self.level) {
+            if self.nodes[pred].forward[i] != target {
                 break;
             }
-            self.nodes[update[i]].forward[i] = self.nodes[target].forward[i];
+            self.nodes[pred].forward[i] = self.nodes[target].forward[i];
         }
 
         while self.level > 1 && self.nodes[0].forward[self.level - 1] == NIL {

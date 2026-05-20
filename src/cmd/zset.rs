@@ -305,26 +305,30 @@ pub fn execute(
             args.lt,
             args.ch,
         )),
-        Command::ZRem(key, members) => {
-            int_result(db.borrow_mut().zrem(*db_index, &key, &members).map(|n| n as i64))
-        }
+        Command::ZRem(key, members) => int_result(
+            db.borrow_mut()
+                .zrem(*db_index, &key, &members)
+                .map(|n| n as i64),
+        ),
         Command::ZScore(key, member) => match db.borrow_mut().zscore(*db_index, &key, &member) {
             Ok(Some(s)) => Frame::bulk_str(format_float(s)),
             Ok(None) => Frame::Null,
             Err(e) => Frame::from_error(&e),
         },
-        Command::ZMScore(key, members) => match db.borrow_mut().zmscore(*db_index, &key, &members) {
-            Ok(scores) => Frame::Array(
-                scores
-                    .into_iter()
-                    .map(|s| match s {
-                        Some(f) => Frame::bulk_str(format_float(f)),
-                        None => Frame::Null,
-                    })
-                    .collect(),
-            ),
-            Err(e) => Frame::from_error(&e),
-        },
+        Command::ZMScore(key, members) => {
+            match db.borrow_mut().zmscore(*db_index, &key, &members) {
+                Ok(scores) => Frame::Array(
+                    scores
+                        .into_iter()
+                        .map(|s| match s {
+                            Some(f) => Frame::bulk_str(format_float(f)),
+                            None => Frame::Null,
+                        })
+                        .collect(),
+                ),
+                Err(e) => Frame::from_error(&e),
+            }
+        }
         Command::ZIncrBy(key, delta, member) => {
             match db.borrow_mut().zincrby(*db_index, &key, delta, &member) {
                 Ok(score) => Frame::bulk_str(format_float(score)),
@@ -336,11 +340,13 @@ pub fn execute(
             Ok(None) => Frame::Null,
             Err(e) => Frame::from_error(&e),
         },
-        Command::ZRevRank(key, member) => match db.borrow_mut().zrevrank(*db_index, &key, &member) {
-            Ok(Some(r)) => Frame::Integer(r as i64),
-            Ok(None) => Frame::Null,
-            Err(e) => Frame::from_error(&e),
-        },
+        Command::ZRevRank(key, member) => {
+            match db.borrow_mut().zrevrank(*db_index, &key, &member) {
+                Ok(Some(r)) => Frame::Integer(r as i64),
+                Ok(None) => Frame::Null,
+                Err(e) => Frame::from_error(&e),
+            }
+        }
         Command::ZCard(key) => int_result(db.borrow_mut().zcard(*db_index, &key).map(|n| n as i64)),
         Command::ZCount(key, min_s, max_s) => {
             let min = match ScoreBound::parse_min(&min_s) {
@@ -490,14 +496,7 @@ pub fn execute(
                 .iter()
                 .map(|b| String::from_utf8_lossy(b).into_owned())
                 .collect();
-            match ScriptEngine::evalsha(
-                script_engine,
-                &sha_str,
-                &keys,
-                &argv,
-                db,
-                db_index,
-            ) {
+            match ScriptEngine::evalsha(script_engine, &sha_str, &keys, &argv, db, db_index) {
                 Ok(f) => f,
                 Err(e) => Frame::from_error(&e),
             }

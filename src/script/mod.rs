@@ -35,7 +35,9 @@ impl ScriptEngine {
     /// 载入缓存并返回 SHA1
     pub fn load_script(&self, script: &str) -> Result<String> {
         let sha = Self::sha1_hex(script);
-        self.cache.borrow_mut().insert(sha.clone(), script.to_owned());
+        self.cache
+            .borrow_mut()
+            .insert(sha.clone(), script.to_owned());
         Ok(sha)
     }
 
@@ -52,14 +54,9 @@ impl ScriptEngine {
         db: &SharedDb,
         db_index: &mut usize,
     ) -> Result<Frame> {
-        let script = engine
-            .cache
-            .borrow()
-            .get(sha)
-            .cloned()
-            .ok_or_else(|| {
-                RedisError::Generic("NOSCRIPT No matching script. Please use EVAL.".into())
-            })?;
+        let script = engine.cache.borrow().get(sha).cloned().ok_or_else(|| {
+            RedisError::Generic("NOSCRIPT No matching script. Please use EVAL.".into())
+        })?;
         Self::eval(engine, &script, keys, argv, db, db_index)
     }
 
@@ -307,8 +304,7 @@ mod tests {
         let mut idx = 0;
         let sha = engine.load_script("return 'loaded'").unwrap();
         assert_eq!(sha.len(), 40);
-        let frame =
-            ScriptEngine::evalsha(&engine, &sha, &[], &[], &db, &mut idx).unwrap();
+        let frame = ScriptEngine::evalsha(&engine, &sha, &[], &[], &db, &mut idx).unwrap();
         assert_eq!(frame, Frame::Bulk(bytes::Bytes::from("loaded")));
     }
 

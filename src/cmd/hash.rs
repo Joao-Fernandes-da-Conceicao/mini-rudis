@@ -148,10 +148,17 @@ pub fn execute(
         Command::HSet(key, fields) => {
             let fields: Vec<(String, Vec<u8>)> =
                 fields.into_iter().map(|(f, v)| (f, v.to_vec())).collect();
-            int_result(db.borrow_mut().hset(*db_index, &key, fields).map(|n| n as i64))
+            int_result(
+                db.borrow_mut()
+                    .hset(*db_index, &key, fields)
+                    .map(|n| n as i64),
+            )
         }
         Command::HSetnx(key, field, val) => {
-            bool_int_result(db.borrow_mut().hsetnx(*db_index, &key, &field, val.to_vec()))
+            bool_int_result(
+                db.borrow_mut()
+                    .hsetnx(*db_index, &key, &field, val.to_vec()),
+            )
         }
         Command::HGet(key, field) => match db.borrow_mut().hget(*db_index, &key, &field) {
             Ok(Some(v)) => Frame::bulk_bytes(v),
@@ -176,10 +183,14 @@ pub fn execute(
                 fields.into_iter().map(|(f, v)| (f, v.to_vec())).collect();
             ok_result(db.borrow_mut().hset(*db_index, &key, fields).map(|_| ()))
         }
-        Command::HDel(key, fields) => {
-            int_result(db.borrow_mut().hdel(*db_index, &key, &fields).map(|n| n as i64))
+        Command::HDel(key, fields) => int_result(
+            db.borrow_mut()
+                .hdel(*db_index, &key, &fields)
+                .map(|n| n as i64),
+        ),
+        Command::HExists(key, field) => {
+            bool_int_result(db.borrow_mut().hexists(*db_index, &key, &field))
         }
-        Command::HExists(key, field) => bool_int_result(db.borrow_mut().hexists(*db_index, &key, &field)),
         Command::HGetAll(key) => match db.borrow_mut().hgetall(*db_index, &key) {
             Ok(pairs) => Frame::Array(
                 pairs

@@ -42,19 +42,9 @@ fn cmd_lrange() {
     let se = script_engine();
     let mut idx = 0;
     run_cmd(&db, &se, &mut idx, &["RPUSH", "l", "a", "b", "c", "d"]);
-    let r = frame_array_all_bulk(run_cmd(
-        &db,
-        &se,
-        &mut idx,
-        &["LRANGE", "l", "1", "2"],
-    ));
+    let r = frame_array_all_bulk(run_cmd(&db, &se, &mut idx, &["LRANGE", "l", "1", "2"]));
     assert_eq!(r, vec!["b", "c"]);
-    let all = frame_array_all_bulk(run_cmd(
-        &db,
-        &se,
-        &mut idx,
-        &["LRANGE", "l", "0", "-1"],
-    ));
+    let all = frame_array_all_bulk(run_cmd(&db, &se, &mut idx, &["LRANGE", "l", "0", "-1"]));
     assert_eq!(all.len(), 4);
 }
 
@@ -78,12 +68,7 @@ fn cmd_lset() {
     let se = script_engine();
     let mut idx = 0;
     run_cmd(&db, &se, &mut idx, &["RPUSH", "l", "a", "b"]);
-    assert_ok(&run_cmd(
-        &db,
-        &se,
-        &mut idx,
-        &["LSET", "l", "1", "B"],
-    ));
+    assert_ok(&run_cmd(&db, &se, &mut idx, &["LSET", "l", "1", "B"]));
     assert_bulk_eq(&run_cmd(&db, &se, &mut idx, &["LINDEX", "l", "1"]), "B");
 }
 
@@ -94,20 +79,10 @@ fn cmd_linsert() {
     let mut idx = 0;
     run_cmd(&db, &se, &mut idx, &["RPUSH", "l", "a", "c"]);
     assert_int_eq(
-        &run_cmd(
-            &db,
-            &se,
-            &mut idx,
-            &["LINSERT", "l", "BEFORE", "c", "b"],
-        ),
+        &run_cmd(&db, &se, &mut idx, &["LINSERT", "l", "BEFORE", "c", "b"]),
         3,
     );
-    let all = frame_array_all_bulk(run_cmd(
-        &db,
-        &se,
-        &mut idx,
-        &["LRANGE", "l", "0", "-1"],
-    ));
+    let all = frame_array_all_bulk(run_cmd(&db, &se, &mut idx, &["LRANGE", "l", "0", "-1"]));
     assert_eq!(all, vec!["a", "b", "c"]);
 }
 
@@ -116,22 +91,9 @@ fn cmd_lrem() {
     let db = shared_db();
     let se = script_engine();
     let mut idx = 0;
-    run_cmd(
-        &db,
-        &se,
-        &mut idx,
-        &["RPUSH", "l", "a", "b", "a", "c", "a"],
-    );
-    assert_int_eq(
-        &run_cmd(&db, &se, &mut idx, &["LREM", "l", "2", "a"]),
-        2,
-    );
-    let all = frame_array_all_bulk(run_cmd(
-        &db,
-        &se,
-        &mut idx,
-        &["LRANGE", "l", "0", "-1"],
-    ));
+    run_cmd(&db, &se, &mut idx, &["RPUSH", "l", "a", "b", "a", "c", "a"]);
+    assert_int_eq(&run_cmd(&db, &se, &mut idx, &["LREM", "l", "2", "a"]), 2);
+    let all = frame_array_all_bulk(run_cmd(&db, &se, &mut idx, &["LRANGE", "l", "0", "-1"]));
     assert_eq!(all, vec!["b", "c", "a"]);
 }
 
@@ -140,19 +102,9 @@ fn cmd_ltrim() {
     let db = shared_db();
     let se = script_engine();
     let mut idx = 0;
-    run_cmd(
-        &db,
-        &se,
-        &mut idx,
-        &["RPUSH", "l", "a", "b", "c", "d"],
-    );
+    run_cmd(&db, &se, &mut idx, &["RPUSH", "l", "a", "b", "c", "d"]);
     assert_ok(&run_cmd(&db, &se, &mut idx, &["LTRIM", "l", "1", "2"]));
-    let all = frame_array_all_bulk(run_cmd(
-        &db,
-        &se,
-        &mut idx,
-        &["LRANGE", "l", "0", "-1"],
-    ));
+    let all = frame_array_all_bulk(run_cmd(&db, &se, &mut idx, &["LRANGE", "l", "0", "-1"]));
     assert_eq!(all, vec!["b", "c"]);
 }
 

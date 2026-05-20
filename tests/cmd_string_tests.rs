@@ -78,10 +78,7 @@ fn cmd_append_strlen() {
     let se = script_engine();
     let mut idx = 0;
     run_cmd(&db, &se, &mut idx, &["SET", "k", "hello"]);
-    assert_int_eq(
-        &run_cmd(&db, &se, &mut idx, &["APPEND", "k", " world"]),
-        11,
-    );
+    assert_int_eq(&run_cmd(&db, &se, &mut idx, &["APPEND", "k", " world"]), 11);
     assert_int_eq(&run_cmd(&db, &se, &mut idx, &["STRLEN", "k"]), 11);
 }
 
@@ -121,10 +118,7 @@ fn cmd_getdel() {
     let mut idx = 0;
     run_cmd(&db, &se, &mut idx, &["SET", "k", "v"]);
     assert_bulk_eq(&run_cmd(&db, &se, &mut idx, &["GETDEL", "k"]), "v");
-    assert_eq!(
-        run_cmd(&db, &se, &mut idx, &["GET", "k"]),
-        Frame::Null
-    );
+    assert_eq!(run_cmd(&db, &se, &mut idx, &["GET", "k"]), Frame::Null);
 }
 
 #[test]

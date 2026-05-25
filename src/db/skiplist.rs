@@ -1,6 +1,6 @@
 //! ZSet 有序索引：跳表（对齐 Redis `t_zset.c`）
 //!
-//! 按 `(score, member)` 字典序排序；member→score 的 O(1) 查找由 [`super::ZSetInner::scores`] 承担。
+//! 按 `(score, member)` 字典序排序；member→score 的 O(1) 查找由 [`crate::db::ZSetInner::scores`] 承担。
 use ordered_float::OrderedFloat;
 use rand::Rng;
 use std::cmp::Ordering;

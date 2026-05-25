@@ -83,7 +83,8 @@ jobs:
       - name: Generate code coverage report
         run: |
           mkdir -p coverage
-          cargo llvm-cov --cobertura --output-path coverage/cobertura.xml --summary-only
+          cargo llvm-cov --summary-only
+          cargo llvm-cov report --cobertura --output-path coverage/cobertura.xml
 
       - name: Upload coverage report
         uses: actions/upload-artifact@v4
